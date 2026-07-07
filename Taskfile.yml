@@ -1,0 +1,53 @@
+version: '3'
+
+vars:
+  GOFLAGS: -trimpath
+  BIN_DIR: '{{.ROOT_DIR}}/bin'
+
+tasks:
+  default:
+    desc: Run tests
+    cmds:
+      - task: test
+
+  tidy:
+    desc: Tidy go modules
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: Format code
+    cmds:
+      - gofmt -w .
+      - goimports -w .
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test -race -count=1 ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  build:
+    desc: Build module
+    cmds:
+      - go build ./...
+
+  ci:
+    desc: Full local CI
+    deps: [tidy, fmt, vet, lint, test, build]
+
+  cleancode:
+    desc: Запуск всех проверок
+    deps:
+      - tidy
+      - vet
+      - lint

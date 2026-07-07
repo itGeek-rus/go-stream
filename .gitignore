@@ -1,0 +1,17 @@
+# IDE
+.idea/
+.vscode/
+
+# Build
+bin/
+dist/
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage.txt
+coverage.html
+
+# Go
+vendor/
