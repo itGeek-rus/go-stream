@@ -27,6 +27,7 @@ func (m Map[T, U]) Apply(ctx context.Context, in <-chan core.Chunk[T]) (<-chan c
 				for _, item := range chunk {
 					v, err := m.Fn(item)
 					if err != nil {
+						core.Fail(ctx, err)
 						return
 					}
 					mapped = append(mapped, v)

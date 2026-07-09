@@ -27,6 +27,7 @@ func (f Filter[T]) Apply(ctx context.Context, in <-chan core.Chunk[T]) (<-chan c
 				for _, item := range chunk {
 					keep, err := f.Predicate(item)
 					if err != nil {
+						core.Fail(ctx, err)
 						return
 					}
 					if keep {
