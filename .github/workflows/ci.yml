@@ -30,6 +30,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Build
+        run: go build ./...
+
+      - name: Build examples
+        run: go build ./examples/...
+
   lint:
     runs-on: ubuntu-latest
     steps:

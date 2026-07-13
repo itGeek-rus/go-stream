@@ -7,11 +7,12 @@ import (
 )
 
 type Filter[T any] struct {
-	Predicate func(T) (bool, error)
+	Predicate  func(T) (bool, error)
+	BufferSize int
 }
 
 func (f Filter[T]) Apply(ctx context.Context, in <-chan core.Chunk[T]) (<-chan core.Chunk[T], error) {
-	out := make(chan core.Chunk[T])
+	out := make(chan core.Chunk[T], core.BufferSize(f.BufferSize))
 
 	go func() {
 		defer close(out)
