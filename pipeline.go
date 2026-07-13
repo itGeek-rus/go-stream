@@ -3,6 +3,7 @@ package go_stream
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/vacheslavterentev/go-stream/adapters/sink"
 	"github.com/vacheslavterentev/go-stream/adapters/source"
@@ -10,21 +11,81 @@ import (
 	"github.com/vacheslavterentev/go-stream/pipeline/core"
 )
 
+const (
+	DefaultChunkSize  = 4
+	DefaultBufferSize = 4
+)
+
 // Stream is the user-facing fluent builder.
 type Stream[T any] struct {
-	open func(ctx context.Context) (<-chan core.Chunk[T], error)
+	open       func(ctx context.Context) (<-chan core.Chunk[T], error)
+	bufferSize int
 }
 
-func FromSlice[T any](items []T) *Stream[T] {
-	src := source.Slice[T]{Items: items, ChunkSize: 4}
+type Option func(*streamConfig)
+
+type streamConfig struct {
+	chunkSize  int
+	bufferSize int
+}
+
+func WithChunkSize(n int) Option {
+	return func(c *streamConfig) {
+		c.chunkSize = n
+	}
+}
+
+func WithBufferSize(n int) Option {
+	return func(c *streamConfig) {
+		c.bufferSize = n
+	}
+}
+
+func applyOptions(opts ...Option) streamConfig {
+	cfg := streamConfig{
+		chunkSize:  DefaultChunkSize,
+		bufferSize: DefaultBufferSize,
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
+func FromSlice[T any](items []T, opts ...Option) *Stream[T] {
+	cfg := applyOptions(opts...)
+	src := source.Slice[T]{
+		Items:      items,
+		ChunkSize:  cfg.chunkSize,
+		BufferSize: cfg.bufferSize,
+	}
 	return &Stream[T]{
-		open: src.Chunks,
+		open:       src.Chunks,
+		bufferSize: cfg.bufferSize,
+	}
+}
+
+func FromCSV(r io.Reader, opts ...Option) *Stream[core.CSVRow] {
+	cfg := applyOptions(opts...)
+	if cfg.chunkSize == DefaultChunkSize {
+		cfg.chunkSize = 0
+	}
+	src := source.CSV{
+		Reader:     r,
+		ChunkSize:  cfg.chunkSize,
+		BufferSize: cfg.bufferSize,
+	}
+	return &Stream[core.CSVRow]{
+		open:       src.Chunks,
+		bufferSize: cfg.bufferSize,
 	}
 }
 
 func Through[T, U any](s *Stream[T], stage core.Stage[T, U]) *Stream[U] {
 	prev := s.open
+	buf := s.bufferSize
 	return &Stream[U]{
+		bufferSize: buf,
 		open: func(ctx context.Context) (<-chan core.Chunk[U], error) {
 			in, err := prev(ctx)
 			if err != nil {
@@ -36,11 +97,17 @@ func Through[T, U any](s *Stream[T], stage core.Stage[T, U]) *Stream[U] {
 }
 
 func (s *Stream[T]) Filter(pred func(T) (bool, error)) *Stream[T] {
-	return Through(s, operators.Filter[T]{Predicate: pred})
+	return Through(s, operators.Filter[T]{
+		Predicate:  pred,
+		BufferSize: s.bufferSize,
+	})
 }
 
 func Map[T, U any](s *Stream[T], fn func(T) (U, error)) *Stream[U] {
-	return Through(s, operators.Map[T, U]{Fn: fn})
+	return Through(s, operators.Map[T, U]{
+		Fn:         fn,
+		BufferSize: s.bufferSize,
+	})
 }
 
 func (s *Stream[T]) Run(ctx context.Context, snk core.Sink[T]) error {
@@ -67,4 +134,8 @@ func (s *Stream[T]) Collect(ctx context.Context) ([]T, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func WriteCSV(ctx context.Context, s *Stream[core.CSVRow], w io.Writer) error {
+	return s.Run(ctx, &sink.CSV{Writer: w})
 }

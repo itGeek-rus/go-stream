@@ -51,3 +51,5 @@ tasks:
       - tidy
       - vet
       - lint
+      - test
+      - build

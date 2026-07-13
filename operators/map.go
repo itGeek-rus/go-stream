@@ -7,11 +7,12 @@ import (
 )
 
 type Map[T, U any] struct {
-	Fn func(T) (U, error)
+	Fn         func(T) (U, error)
+	BufferSize int
 }
 
 func (m Map[T, U]) Apply(ctx context.Context, in <-chan core.Chunk[T]) (<-chan core.Chunk[U], error) {
-	out := make(chan core.Chunk[U])
+	out := make(chan core.Chunk[U], core.BufferSize(m.BufferSize))
 
 	go func() {
 		defer close(out)
