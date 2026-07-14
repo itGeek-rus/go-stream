@@ -3,6 +3,7 @@ package go_stream_test
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -111,5 +112,85 @@ func TestFromSlice_WithBufferSize(t *testing.T) {
 
 	if len(out) != 4 {
 		t.Fatalf("got %d items, want 4", len(out))
+	}
+}
+
+func TestParallelMap(t *testing.T) {
+	t.Parallel()
+
+	out, err := go_stream.ParallelMap(
+		go_stream.FromSlice([]int{1, 2, 3, 4}, go_stream.WithChunkSize(2)),
+		3,
+		func(v int) (int, error) { return v * 2, nil },
+	).Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	sort.Ints(out)
+	want := []int{2, 4, 6, 8}
+	if len(out) != len(want) {
+		t.Fatalf("got %v, want %v", out, want)
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Fatalf("got %v, want %v", out, want)
+		}
+	}
+}
+
+func TestParallelMap_Error(t *testing.T) {
+	t.Parallel()
+
+	_, err := go_stream.ParallelMap(
+		go_stream.FromSlice([]int{1, 2, 3}),
+		2,
+		func(v int) (int, error) {
+			if v == 2 {
+				return 0, errors.New("boom")
+			}
+			return v, nil
+		},
+	).Collect(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGroupBy(t *testing.T) {
+	t.Parallel()
+
+	type row struct{ country string }
+	items := []row{{"RU"}, {"US"}, {"RU"}, {"DE"}}
+
+	groups, err := go_stream.GroupBy(
+		context.Background(),
+		go_stream.FromSlice(items),
+		func(r row) (string, error) { return r.country, nil },
+	)
+	if err != nil {
+		t.Fatalf("GroupBy: %v", err)
+	}
+
+	if len(groups["RU"]) != 2 || len(groups["US"]) != 1 || len(groups["DE"]) != 1 {
+		t.Fatalf("unexpected groups: %#v", groups)
+	}
+}
+
+func TestGroupBy_Error(t *testing.T) {
+	t.Parallel()
+
+	_, err := go_stream.GroupBy(
+		context.Background(),
+		go_stream.FromSlice([]int{1, 2, 3}),
+		func(v int) (string, error) {
+			if v == 2 {
+				return "", errors.New("bad key")
+			}
+			return "ok", nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }

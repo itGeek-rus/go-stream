@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/vacheslavterentev/go-stream/adapters/parallel"
 	"github.com/vacheslavterentev/go-stream/adapters/sink"
 	"github.com/vacheslavterentev/go-stream/adapters/source"
 	"github.com/vacheslavterentev/go-stream/operators"
@@ -138,4 +139,33 @@ func (s *Stream[T]) Collect(ctx context.Context) ([]T, error) {
 
 func WriteCSV(ctx context.Context, s *Stream[core.CSVRow], w io.Writer) error {
 	return s.Run(ctx, &sink.CSV{Writer: w})
+}
+
+// ParallelMap applies fn concurrently across workers.
+// Order of results is not guaranteed.
+func ParallelMap[T, U any](s *Stream[T], workers int, fn func(T) (U, error)) *Stream[U] {
+	return Through(s, parallel.Map[T, U]{
+		Workers:    workers,
+		Fn:         fn,
+		BufferSize: s.bufferSize,
+	})
+}
+
+// GroupBy collects stream items into a map keyed by keyFn.
+func GroupBy[K comparable, T any](ctx context.Context, s *Stream[T], keyFn func(T) (K, error)) (map[K][]T, error) {
+	ctx, fail := core.WithFailure(ctx)
+
+	in, err := s.open(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open stream: %w", err)
+	}
+
+	groups, err := operators.GroupBy[K, T]{KeyFn: keyFn}.Collect(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if err := fail(); err != nil {
+		return nil, fmt.Errorf("stage: %w", err)
+	}
+	return groups, nil
 }
