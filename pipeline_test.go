@@ -194,3 +194,92 @@ func TestGroupBy_Error(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestOrderedParallelMap(t *testing.T) {
+	t.Parallel()
+
+	out, err := go_stream.OrderedParallelMap(
+		go_stream.FromSlice([]int{1, 2, 3, 4, 5}, go_stream.WithChunkSize(2)),
+		3,
+		func(v int) (int, error) { return v * 10, nil },
+	).Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	want := []int{10, 20, 30, 40, 50}
+	if len(out) != len(want) {
+		t.Fatalf("got %v, want %v", out, want)
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Fatalf("got %v, want %v", out, want)
+		}
+	}
+}
+
+func TestOrderedParallelMap_Error(t *testing.T) {
+	t.Parallel()
+
+	_, err := go_stream.OrderedParallelMap(
+		go_stream.FromSlice([]int{1, 2, 3}),
+		2,
+		func(v int) (int, error) {
+			if v == 2 {
+				return 0, errors.New("boom")
+			}
+			return v, nil
+		},
+	).Collect(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestJoin(t *testing.T) {
+	t.Parallel()
+
+	type user struct{ id int }
+	type order struct {
+		userID int
+		amount int
+	}
+
+	pairs, err := go_stream.Join(
+		context.Background(),
+		go_stream.FromSlice([]user{{1}, {2}}),
+		go_stream.FromSlice([]order{{1, 10}, {2, 30}, {1, 20}}),
+		func(u user) (int, error) { return u.id, nil },
+		func(o order) (int, error) { return o.userID, nil },
+	)
+	if err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+
+	if len(pairs) != 3 {
+		t.Fatalf("got %d pairs, want 3", len(pairs))
+	}
+
+	amountsByUser := map[int][]int{}
+	for _, p := range pairs {
+		amountsByUser[p.Left.id] = append(amountsByUser[p.Left.id], p.Right.amount)
+	}
+	if len(amountsByUser[1]) != 2 || len(amountsByUser[2]) != 1 {
+		t.Fatalf("unexpected pairs: %#v", pairs)
+	}
+}
+
+func TestJoin_Error(t *testing.T) {
+	t.Parallel()
+
+	_, err := go_stream.Join(
+		context.Background(),
+		go_stream.FromSlice([]int{1}),
+		go_stream.FromSlice([]int{1}),
+		func(v int) (int, error) { return v, nil },
+		func(int) (int, error) { return 0, errors.New("bad key") },
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}

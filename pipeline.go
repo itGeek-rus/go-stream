@@ -169,3 +169,44 @@ func GroupBy[K comparable, T any](ctx context.Context, s *Stream[T], keyFn func(
 	}
 	return groups, nil
 }
+
+// OrderedParallelMap applies fn concurrently and preserves input order.
+func OrderedParallelMap[T, U any](s *Stream[T], workers int, fn func(T) (U, error)) *Stream[U] {
+	return Through(s, parallel.OrderedMap[T, U]{
+		Workers:    workers,
+		Fn:         fn,
+		BufferSize: s.bufferSize,
+	})
+}
+
+// Join - inner hash-join. Правый stream загружается в память.
+func Join[K comparable, L, R any](
+	ctx context.Context,
+	left *Stream[L],
+	right *Stream[R],
+	leftKey func(L) (K, error),
+	rightKey func(R) (K, error),
+) ([]operators.Pair[L, R], error) {
+	ctx, fail := core.WithFailure(ctx)
+
+	lCh, err := left.open(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open left: %w", err)
+	}
+	rCh, err := right.open(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open right: %w", err)
+	}
+
+	pairs, err := operators.InnerJoin[K, L, R]{
+		LeftKey:  leftKey,
+		RightKey: rightKey,
+	}.Collect(ctx, lCh, rCh)
+	if err != nil {
+		return nil, err
+	}
+	if err := fail(); err != nil {
+		return nil, fmt.Errorf("stage: %w", err)
+	}
+	return pairs, nil
+}
