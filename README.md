@@ -4,9 +4,10 @@
 
 ## Особенности
 
-- **Безопасная типизация** — операции `Map`, `Filter`, `ParallelMap`, `GroupBy` параметризованы типами, поддерживаются цепочки `T → U`.
+- **Безопасная типизация** — операции `Map`, `Filter`, `ParallelMap`, `OrderedParallelMap`, `GroupBy`, `Join` параметризованы типами, поддерживаются цепочки `T → U`.
 - **Потоковая обработка** — данные читаются и обрабатываются чанками, не загружая весь набор в память.
-- **Параллелизм** — `ParallelMap` распределяет работу по воркерам (порядок результатов не гарантируется).
+- **Параллелизм** — `ParallelMap` без гарантии порядка; `OrderedParallelMap` сохраняет порядок входа.
+- **Join** — inner hash-join (правый stream целиком в памяти).
 - **Чистая архитектура** — источники и приёмники отделены от логики обработки; легко подменять адаптеры.
 - **Готовые адаптеры** — slice (для тестов и in-memory), CSV (stdlib `encoding/csv`).
 - **Управление контекстом** — поддержка `context.Context` для отмены, таймаутов и fail-fast при ошибках в stages.
@@ -14,8 +15,8 @@
 ## Архитектура
 
 ```
-Source → [Filter | Map | ParallelMap] → Sink
-                              ↘ GroupBy (терминальная операция)
+Source → [Filter | Map | ParallelMap | OrderedParallelMap] → Sink
+                         ↘ GroupBy / Join (терминальные операции)
 ```
 
 - Данные идут чанками (`Chunk[T]`) через каналы
@@ -61,13 +62,20 @@ rows, err := go_stream.FromCSV(reader, go_stream.WithChunkSize(100)).
 err = go_stream.WriteCSV(ctx, go_stream.FromSlice(rows), writer)
 ```
 
-### ParallelMap
+### ParallelMap / OrderedParallelMap
 
 ```go
 // Порядок элементов не гарантируется
 out, err := go_stream.ParallelMap(
     go_stream.FromSlice([]int{1, 2, 3, 4, 5, 6}),
     4, // workers
+    func(v int) (int, error) { return v * v, nil },
+).Collect(ctx)
+
+// Порядок входа сохраняется
+ordered, err := go_stream.OrderedParallelMap(
+    go_stream.FromSlice([]int{1, 2, 3, 4, 5, 6}),
+    4,
     func(v int) (int, error) { return v * v, nil },
 ).Collect(ctx)
 ```
@@ -83,6 +91,19 @@ groups, err := go_stream.GroupBy(
 // map[string][]Item
 ```
 
+### Join (inner)
+
+```go
+pairs, err := go_stream.Join(
+    ctx,
+    leftStream,
+    rightStream, // полностью буферизуется в памяти
+    func(l Left) (int, error) { return l.ID, nil },
+    func(r Right) (int, error) { return r.LeftID, nil },
+)
+// []operators.Pair[Left, Right]
+```
+
 Опции: `WithChunkSize(n)`, `WithBufferSize(n)` — размер чанка и буфер канала для backpressure.
 
 ## Установка
@@ -95,7 +116,8 @@ go get github.com/vacheslavterentev/go-stream
 
 ```bash
 task cleancode   # tidy, vet, lint, test, build
-go test -race ./...
+go test -race -timeout 60s ./...
+go build ./examples/...
 ```
 
 ### Git hooks (lefthook)
