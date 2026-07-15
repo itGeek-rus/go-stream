@@ -41,9 +41,24 @@ tasks:
     cmds:
       - go build ./...
 
+  gosec:
+    desc: Security scan
+    cmds:
+      - gosec -quiet ./...
+
+  vuln:
+    desc: Vulnerability check
+    cmds:
+      - govulncheck ./...
+
+  examples:
+    desc: Build examples
+    cmds:
+      - go build ./examples/...
+
   ci:
     desc: Full local CI
-    deps: [tidy, fmt, vet, lint, test, build]
+    deps: [tidy, fmt, vet, lint, gosec, vuln, test, build, examples]
 
   cleancode:
     desc: Запуск всех проверок
@@ -51,5 +66,8 @@ tasks:
       - tidy
       - vet
       - lint
+      - gosec
+      - vuln
       - test
       - build
+      - examples

@@ -179,7 +179,7 @@ func OrderedParallelMap[T, U any](s *Stream[T], workers int, fn func(T) (U, erro
 	})
 }
 
-// Join - inner hash-join. Правый stream загружается в память.
+// Join is an inner hash-join. The right stream is fully buffered in memory.
 func Join[K comparable, L, R any](
 	ctx context.Context,
 	left *Stream[L],
@@ -209,4 +209,54 @@ func Join[K comparable, L, R any](
 		return nil, fmt.Errorf("stage: %w", err)
 	}
 	return pairs, nil
+}
+
+// LeftJoin is a left outer hash-join. The right stream is fully buffered in memory.
+func LeftJoin[K comparable, L, R any](
+	ctx context.Context,
+	left *Stream[L],
+	right *Stream[R],
+	leftKey func(L) (K, error),
+	rightKey func(R) (K, error),
+) ([]operators.LeftPair[L, R], error) {
+	ctx, fail := core.WithFailure(ctx)
+
+	lCh, err := left.open(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open left: %w", err)
+	}
+	rCh, err := right.open(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open right: %w", err)
+	}
+
+	pairs, err := operators.LeftJoin[K, L, R]{
+		LeftKey:  leftKey,
+		RightKey: rightKey,
+	}.Collect(ctx, lCh, rCh)
+	if err != nil {
+		return nil, err
+	}
+	if err := fail(); err != nil {
+		return nil, fmt.Errorf("stage: %w", err)
+	}
+	return pairs, nil
+}
+
+func FromParquet[T any](r io.ReaderAt, size int64, opts ...Option) *Stream[T] {
+	cfg := applyOptions(opts...)
+	if cfg.chunkSize == DefaultChunkSize {
+		cfg.chunkSize = 0
+	}
+	src := source.Parquet[T]{
+		Reader:     r,
+		Size:       size,
+		ChunkSize:  cfg.chunkSize,
+		BufferSize: cfg.bufferSize,
+	}
+	return &Stream[T]{open: src.Chunks, bufferSize: cfg.bufferSize}
+}
+
+func WriteParquet[T any](ctx context.Context, s *Stream[T], w io.Writer) error {
+	return s.Run(ctx, &sink.Parquet[T]{Writer: w})
 }

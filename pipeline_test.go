@@ -1,6 +1,7 @@
 package go_stream_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sort"
@@ -281,5 +282,76 @@ func TestJoin_Error(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestLeftJoin(t *testing.T) {
+	t.Parallel()
+
+	type user struct{ id int }
+	type order struct {
+		userID int
+		amount int
+	}
+
+	pairs, err := go_stream.LeftJoin(
+		context.Background(),
+		go_stream.FromSlice([]user{{1}, {2}}),
+		go_stream.FromSlice([]order{{1, 10}}),
+		func(u user) (int, error) { return u.id, nil },
+		func(o order) (int, error) { return o.userID, nil },
+	)
+	if err != nil {
+		t.Fatalf("LeftJoin: %v", err)
+	}
+
+	var seenUnmatched bool
+	var matched int
+	for _, p := range pairs {
+		if !p.Ok {
+			seenUnmatched = true
+			if p.Left.id != 2 {
+				t.Fatalf("expected unmatched user 2, got %#v", p)
+			}
+			continue
+		}
+		matched++
+	}
+	if matched != 1 || !seenUnmatched {
+		t.Fatalf("matched=%d unmatched=%v pairs=%#v", matched, seenUnmatched, pairs)
+	}
+}
+
+func TestParquet_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	type row struct {
+		ID   int64  `parquet:"id"`
+		Name string `parquet:"name"`
+	}
+
+	input := []row{{1, "a"}, {2, "b"}, {3, "c"}}
+	var buf bytes.Buffer
+	if err := go_stream.WriteParquet(
+		context.Background(),
+		go_stream.FromSlice(input, go_stream.WithChunkSize(2)),
+		&buf,
+	); err != nil {
+		t.Fatalf("WriteParquet: %v", err)
+	}
+
+	out, err := go_stream.FromParquet[row](bytes.NewReader(buf.Bytes()), int64(buf.Len()), go_stream.WithChunkSize(2)).
+		Collect(context.Background())
+	if err != nil {
+		t.Fatalf("FromParquet/Collect: %v", err)
+	}
+
+	if len(out) != len(input) {
+		t.Fatalf("got %v, want %v", out, input)
+	}
+	for i := range input {
+		if out[i] != input[i] {
+			t.Fatalf("got %v, want %v", out, input)
+		}
 	}
 }
